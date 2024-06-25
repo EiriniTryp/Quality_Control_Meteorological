@@ -25,57 +25,56 @@ library(openxlsx)
 
 #Set working Directory
 #setwd("XXXXX")
-setwd("C:\\Users\\e.trypidaki\\OneDrive - CREAF\\Escritorio\\Data\\Quality_Control")
 
 #Load meteorological stations data
-#csv_directory <- "XXXXX"
-csv_directory <- "C:/Users/e.trypidaki/OneDrive - CREAF/Escritorio/Data/FirstClean/"
+setwd("C:/Users/e.trypidaki/OneDrive - CREAF/Escritorio/Data/")
+csv_directory <- "./Ground_Data/FirstClean/"
 csv_files <- list.files(csv_directory,pattern = "\\.csv$", full.names = TRUE)
 
 #Load study Area
-StudyArea <- st_read("C:/Users/e.trypidaki/OneDrive - CREAF/Escritorio/Data/EbroLimits/buffered25km.geojson", promote_to_multi = FALSE)
+StudyArea <- st_read("./EbroLimits/buffered25km.geojson", promote_to_multi = FALSE)
 
 #_______________________________________________________________________________________
 ### Pre-processing functions ####
 #_______________________________________________________________________________________
 # List all the csv files with meteorological data
-# Select variables
-read_weather_data <- function(csv_files) {
+# Function to QA_preprocessing raw Meteodata
+QA_preprocessing <- function(csv_files, station_name_col, lon_col, lat_col, alt_col, precip_col, tmean_col, tmin_col, tmax_col,
+                             year_col, month_col) {
+  
   # Read and process each CSV file
   data <- lapply(csv_files, function(csv_file) {
     df <- read.csv(csv_file)
-    df$Station_ID <- as.character(df$Station_Name)
     df$Source <- basename(csv_file)
-    df$Year <- as.numeric(df$Year)
-    df$Month <- as.numeric(df$Month)
-    # Select required columns
-    df <- select(df, "Station_ID", "Year", "Month", "Station_Altitude", "Precipitacion.mm",
-                 "Tmean.C", "Tmin.C", "Tmax.C", "X", "Y", "Source")
-
-    return(df)  # Return the processed dataframe
+    
+    # Standardize column names and ensure Station_ID is character
+    df <- df %>%
+      rename(
+        Station_ID = !!sym(station_name_col),
+        Longitude = !!sym(lon_col),
+        Latitude = !!sym(lat_col),
+        Altitude = !!sym(alt_col),
+        Precipitation = !!sym(precip_col),
+        Tmean = !!sym(tmean_col),
+        Tmin = !!sym(tmin_col),
+        Tmax = !!sym(tmax_col),
+        Year = !!sym(year_col),
+        Month = !!sym(month_col)
+      ) %>%
+      mutate(
+        Station_ID = as.character(Station_ID),  # Ensure Station_ID is character
+        Year = as.numeric(Year),
+        Month = as.numeric(Month)
+      )
+    
+    return(df)
   })
   
   # Combine all processed dataframes into one
   data <- bind_rows(data)
   
-  return(data)
-}
-# Load meteorological data
-df <- read_weather_data(csv_files)
-
-# Function to QA_preprocessing raw Meteodata
-QA_preprocessing <- function(raw_meteodata_df, Station_ID,Longitude, Latitude,  Altitude, Precipitation, Tmean, Tmin, Tmax) {
-  processed_df <- raw_meteodata_df %>%
-    dplyr::rename(
-      Station_ID = {{ Station_ID }},
-      Longitude = {{ Longitude }},
-      Latitude = {{ Latitude }},
-      Altitude = {{ Altitude }},
-      Precipitation = {{ Precipitation }},
-      Tmean = {{ Tmean }},
-      Tmin = {{ Tmin }},
-      Tmax = {{ Tmax }}
-    ) %>%
+  # Preprocess and QA the data
+  processed_df <- data %>%
     mutate(
       YYYYMMdate = as.character(paste0(Year, "-", sprintf("%02d", Month), "-15"))
     ) %>%
@@ -92,22 +91,36 @@ QA_preprocessing <- function(raw_meteodata_df, Station_ID,Longitude, Latitude,  
         max(YYYYMMdate)
       )
     ) %>%
+    ungroup() %>%
     mutate(
       Start_Date = as.Date(Start_Date),
       End_Date = as.Date(End_Date)
     ) %>%
-    ungroup() %>%
     select(
       Station_ID, Year, Month, Altitude, Precipitation, Tmean, Tmin, Tmax,
-      Latitude, Longitude, Start_Date, End_Date, YYYYMMdate
+      Latitude, Longitude, Start_Date, End_Date, YYYYMMdate, Source
     )
   
   return(processed_df)
 }
 
-# Calculate
-processed_df <- QA_preprocessing(df, "Station_ID", "X", "Y", "Station_Altitude", "Precipitacion.mm", "Tmean.C", "Tmin.C", "Tmax.C")
 
+processed_df <- QA_preprocessing(
+  csv_files,
+  station_name_col = "Station_Name",
+  lon_col = "X",
+  lat_col = "Y",
+  alt_col = "Station_Altitude",
+  precip_col = "Precipitacion.mm",
+  tmean_col = "Tmean.C",
+  tmin_col = "Tmin.C",
+  tmax_col = "Tmax.C",
+  year_col = "Year",
+  month_col = "Month"
+)
+
+# View the processed dataframe
+glimpse(processed_df)
 #_______________________________________________________________________________________
 ### Create functions####
 #_______________________________________________________________________________________
@@ -419,7 +432,7 @@ QA_obs_plot <- function(df, variable_name) {
   p <- ggplot(observation_count, aes(x = Year, y = Station_Count)) +
     geom_line() +
     geom_point() +
-    labs(title = paste("Number of", variable_name, "observations by Number of Stations"),
+    labs(title = paste("Number stations by year for", variable_name),
          x = "Year", y = "Number of Stations") +
     scale_x_continuous(breaks = seq(min(observation_count$Year), max(observation_count$Year), by = 5)) +
     theme_minimal()
@@ -521,7 +534,7 @@ export_report(gaps_series,  "gaps_series_report.txt", "gaps_series_report.xlsx")
 gaps <-cleaned_df2[cleaned_df2$Station_ID %in% unique(gaps_series$Station_ID), ]
 
 ## One way to plot all of them together
-QA_heatmap(gaps,"Precipitation",2015,2024)
+QA_heatmap(gaps,"Precipitation",1950,2024)
 
 ## Second way to plot individually
 QA_plot_gaps <- function(df, variable_name) {
